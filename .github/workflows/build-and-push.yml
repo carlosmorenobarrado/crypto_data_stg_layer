@@ -22,7 +22,7 @@ jobs:
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
-          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN_2 }}
+          password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN_3 }}
 
       - name: Build and push Docker image # Paso 4: Construye y sube la imagen
         uses: docker/build-push-action@v5
