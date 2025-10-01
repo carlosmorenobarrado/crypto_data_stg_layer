@@ -200,6 +200,17 @@ def compute_technicals(df_ohlcv: pd.DataFrame) -> pd.DataFrame:
     return df[keep]
 
 # ========= Joins =========
+
+def normalize_ts(df):
+    if "ts" in df.columns:
+        # si no tiene tz → lo forzamos a UTC
+        if df["ts"].dtype == "datetime64[ns]":
+            df["ts"] = df["ts"].dt.tz_localize("UTC")
+        # si ya tiene tz pero no es UTC → lo convertimos
+        elif str(df["ts"].dtype).startswith("datetime64[ns,") and str(df["ts"].dtype) != "datetime64[ns, UTC]":
+            df["ts"] = df["ts"].dt.tz_convert("UTC")
+    return df
+
 def join_agg_trades(features_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     if features_df.empty: return features_df
     tmin, tmax = features_df["ts"].min(), features_df["ts"].max()
@@ -216,6 +227,8 @@ def join_agg_trades(features_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     WHERE symbol=:s AND ts_window_start BETWEEN :tmin AND :tmax
     """
     agg = pd.read_sql_query(text(q), engine, params={"s": symbol, "tmin": tmin, "tmax": tmax}, parse_dates=["ts"])
+    features_df = normalize_ts(features_df)
+    agg = normalize_ts(agg)
     return features_df.merge(agg, on=["ts","symbol"], how="left")
 
 def join_orderbook(features_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
@@ -233,6 +246,8 @@ def join_orderbook(features_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     WHERE symbol=:s AND ts BETWEEN :tmin AND :tmax
     """
     ob = pd.read_sql_query(text(q), engine, params={"s": symbol, "tmin": tmin, "tmax": tmax}, parse_dates=["ts"])
+    features_df = normalize_ts(features_df)
+    ob = normalize_ts(ob)
     return features_df.merge(ob, on=["ts","symbol"], how="left")
 
 def join_perp_metrics(features_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
@@ -249,6 +264,8 @@ def join_perp_metrics(features_df: pd.DataFrame, symbol: str) -> pd.DataFrame:
     WHERE symbol=:s AND ts BETWEEN :tmin AND :tmax
     """
     pm = pd.read_sql_query(text(q), engine, params={"s": symbol, "tmin": tmin, "tmax": tmax}, parse_dates=["ts"])
+    features_df = normalize_ts(features_df)
+    pm = normalize_ts(pm)
     df = features_df.merge(pm, on=["ts","symbol"], how="left").sort_values(["symbol","ts"])
     df["oi_delta_1m"] = df.groupby("symbol")["oi"].diff()
     return df
@@ -270,6 +287,8 @@ def join_liquidations_agg(features_df: pd.DataFrame, symbol: str) -> pd.DataFram
     SELECT * FROM liq WHERE ts BETWEEN :tmin AND :tmax
     """
     liq = pd.read_sql_query(text(q), engine, params={"s": symbol, "tmin": tmin, "tmax": tmax}, parse_dates=["ts"])
+    features_df = normalize_ts(features_df)
+    liq = normalize_ts(liq)
     return features_df.merge(liq, on=["ts","symbol"], how="left")
 
 # ========= Inserción =========
