@@ -6,7 +6,7 @@ metadata:
   labels:
     app: main-process
 spec:
-  schedule: "*/5 * * * *" # O tu horario deseado
+  schedule: "* * * * *" # O tu horario deseado
   jobTemplate:
     spec:
       template:
