@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, text
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # --- DB ---
-DB_HOST = "192.168.1.49"
+DB_HOST = "192.168.1.47"
 DB_NAME = "criptodb"
 DB_USER = "admincar"
 DB_PASSWORD = "1234car"
