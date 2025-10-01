@@ -15,9 +15,6 @@ spec:
           - name: main-process
             image: carlosmoreno7/main-process:latest # ¡Asegúrate de que este tag sea correcto!
             imagePullPolicy: Always # <--- ¡ESTO ES CLAVE!
-            envFrom: # Para inyectar las credenciales desde el Secret
-            - secretRef:
-                name: main-process-secrets
           restartPolicy: OnFailure
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1

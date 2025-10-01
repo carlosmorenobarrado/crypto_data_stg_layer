@@ -30,6 +30,7 @@ logging.info(f"Conexión a PostgreSQL establecida exitosamente con SQLAlchemy en
 def ema(series: pd.Series, span: int) -> pd.Series:
     return series.ewm(span=span, adjust=False).mean()
 
+
 def rsi(series: pd.Series, n: int = 14) -> pd.Series:
     delta = series.diff()
     up = pd.Series(np.where(delta > 0, delta, 0.0), index=series.index)
@@ -38,6 +39,7 @@ def rsi(series: pd.Series, n: int = 14) -> pd.Series:
     roll_down = down.ewm(alpha=1/n, adjust=False).mean()
     rs = roll_up / (roll_down.replace(0, np.nan))
     return 100 - (100 / (1 + rs))
+
 
 def macd(series: pd.Series, fast=12, slow=26, signal=9):
     ema_fast = ema(series, fast)
