@@ -1,63 +1,76 @@
-# Kubernetes_argocd_template
-Template for jobs in kubernetes
 
-#### Instrucciones de uso:
+# 📘 Fase de transformación
 
-Paso 1: Crear un user y una password en docker.io para incluirlos en el repositorio como secretos de acceso a docker. Posteriormente, el propio repositorio lo usará en este paso:
+## 🎯 Objetivo
+Transformar los datos brutos de mercado (Fase 1) en **señales cuantitativas útiles** para modelos de machine learning y estrategias de trading algorítmico.
 
-username: ${{ secrets.DOCKER_HUB_USERNAME }}
+---
 
-password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN_2 }}
+## 🧩 Arquitectura General
+- **Fuente**: Tablas RAW y complementarias (`crypto.raw_*`, `agg_trades_1m`, `orderbook_snapshot_1m`, `perp_metrics_1m`, `liquidations_stream`).  
+- **Proceso**: `crypto_data_stg_layer` (ETL incremental en Python + SQLAlchemy).  
+- **Destino**: Tabla consolidada `crypto.features_1m`.  
+- **Ejecución**: Automatizable vía CronJob (1m o 5m) dentro del clúster Kubernetes (gestionado por ArgoCD).
 
-Es importante que tengan el mismo nombre, si se cambia se debe también cambiar en build-and-push.yml
+---
 
-Paso 2: Modificar el nombre de la carpeta que contendrá el código y el cronjob.yaml. Es importante utilizar nombres representativos de manera que cuando se genere la app en argo, se pueda identificar todo con claridad.
+## 🧠 Lógica del Proceso
 
-Paso 3: Revisar si son necesarios secretos nuevos para acceso a API's. En ese caso, revisar el código https://github.com/carlosmorenobarrado/cryto_data_extraction_load.git que ya tiene secretos incluidos. El siguiente contenido es el usado de gemini para realizar la codificación:
+1. **Lectura incremental:**
+   - Detecta el último `ts` procesado en `features_1m`.
+   - Trae nuevas filas desde `raw_btc_usdt_1m` más una **ventana de contexto (300 minutos)** para cálculos rolling (EMA, RSI…).
 
-## Paso 1: Crea el archivo YAML local
-En tu terminal, crea un archivo llamado secreto-temporal.yaml. Puedes usar el editor que prefieras (como nano o vim), o simplemente copiar y pegar.
+2. **Cálculo de indicadores técnicos (OHLCV):**
+   | Indicador | Descripción | Columna |
+   |------------|-------------|----------|
+   | MA7 / MA21 | Medias móviles simples (7 y 21 minutos). | `ma7`, `ma21` |
+   | EMA21 | Media móvil exponencial, suaviza tendencias. | `ema21` |
+   | RSI(14) | Índice de fuerza relativa (0–100). | `rsi_14` |
+   | MACD(12,26,9) | Cruce de medias exponenciales, mide momentum. | `macd_12_26`, `macd_signal_9`, `macd_hist` |
+   | Bollinger(20,2) | Bandas de volatilidad (superior/inferior/anchura). | `bb_upper_20_2`, `bb_lower_20_2`, `bb_width_20_2` |
+   | OBV | On-Balance Volume (volumen direccional). | `obv` |
+   | Momentum | Ratio de cambio de precio (1m y 7m). | `momentum_1m`, `momentum_7m` |
 
-Este archivo es temporal y NUNCA lo subirás a GitHub.
+3. **Indicadores de microestructura (nivel 2 del mercado):**
+   | Fuente | Descripción | Columnas |
+   |---------|-------------|-----------|
+   | `agg_trades_1m` | Volumen y desequilibrio de trades agresivos. | `vwap_tick_1m`, `rv_tick_1m`, `trade_imb_1m` |
+   | `orderbook_snapshot_1m` | Profundidad del libro y spreads. | `spread_bps`, `obi5`, `depth_bid5_delta`, `depth_ask5_delta` |
 
-secreto-temporal.yaml:
+4. **Indicadores derivados (perpetual futures):**
+   | Fuente | Descripción | Columnas |
+   |---------|-------------|-----------|
+   | `perp_metrics_1m` | Funding, basis y open interest (OI). | `funding_rate`, `basis_rel`, `oi` |
+   | — | Cambio en OI (señal de aperturas/cierres de posiciones). | `oi_delta_1m` |
 
-YAML
+5. **Eventos de riesgo (liquidaciones):**
+   | Fuente | Descripción | Columnas |
+   |---------|-------------|-----------|
+   | `liquidations_stream` | Agregado por minuto desde WS. | `liq_buy_qty_1m`, `liq_sell_qty_1m`, `liq_count_1m` |
 
-apiVersion: v1
-kind: Secret
-metadata:
-  name: cryto-data-ext-ld-secrets
-  namespace: default
-data:
+6. **Inserción incremental:**
+   - Inserta solo filas nuevas (ON CONFLICT DO NOTHING).
+   - Totalmente idempotente y segura para ejecución frecuente.
 
-  API_KEY: PEGA_AQUI_TU_API_KEY_EN_BASE64
-  API_SECRET: PEGA_AQUI_TU_API_SECRET_EN_BASE64
+---
 
-## Paso 2: Sella el secreto
-Ahora, desde tu terminal, ejecuta este comando. Asegúrate de estar en el mismo directorio donde guardaste el archivo secreto-temporal.yaml.
+## 🧾 Estructura Final: `crypto.features_1m`
 
-Bash
+| Categoría | Columna | Descripción |
+|------------|----------|-------------|
+| Temporal | `ts`, `symbol` | Timestamp (UTC) y par. |
+| Precio y volatilidad | `close`, `ret_1m`, `ret_5m`, `rv_5m`, `rv_15m` | Precio y retornos logarítmicos. |
+| Técnicos | `ma7`, `ma21`, `ema21`, `rsi_14`, `macd_12_26`, `macd_signal_9`, `macd_hist`, `bb_upper_20_2`, `bb_lower_20_2`, `bb_width_20_2`, `obv`, `momentum_1m`, `momentum_7m` | Indicadores clásicos de tendencia y momentum. |
+| Microestructura | `vwap_tick_1m`, `rv_tick_1m`, `trade_imb_1m`, `spread_bps`, `obi5`, `depth_bid5_delta`, `depth_ask5_delta` | Señales derivadas de order flow. |
+| Derivados | `funding_rate`, `basis_rel`, `oi`, `oi_delta_1m` | Variables de futuros perpetuos. |
+| Riesgo / liquidaciones | `liq_buy_qty_1m`, `liq_sell_qty_1m`, `liq_count_1m` | Métricas agregadas de liquidaciones. |
 
-kubeseal < secreto-temporal.yaml > kubernetes/sealed-crypto-secret.yaml
-Este comando hace lo siguiente:
+---
 
-Lee tu secreto-temporal.yaml.
+## ✅ Estado final
+- ✔️ ETL incremental consolidado en `features_1m`.
+- ✔️ Limpieza y normalización de timestamps (UTC).
+- ✔️ Cálculo completo de indicadores técnicos, microestructura y derivados.
+- ✔️ Datos listos para exploración y entrenamiento ML.
 
-Lo encripta.
-
-Guarda el resultado en un nuevo archivo llamado sealed-crypto-secret.yaml directamente dentro de tu carpeta kubernetes/.
-
-## Paso 3: Sube el archivo seguro a GitHub
-Ya puedes borrar el archivo temporal si quieres (rm secreto-temporal.yaml).
-
-Ahora, sube a tu repositorio el nuevo archivo sellado, que es 100% seguro de compartir.
-
-Bash
-
-## Añade el nuevo secreto sellado al repositorio
-git add kubernetes/sealed-crypto-secret.yaml
-
-## Crea el commit
-git commit -m "feat: Add encrypted application secrets"
-git push
+---
